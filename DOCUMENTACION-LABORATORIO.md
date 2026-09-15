@@ -241,77 +241,23 @@ Los nombres de las interfaces pueden variar según la plantilla. No se deben cop
 
 ---
 
-## 7. Configuración de R-CORE
+## 7. Configuración de R-CORE mediante Winbox
 
-### 7.1 Bridge e IP LAN
+La implementación realizada en el laboratorio se debe documentar y reproducir mediante [GUIA-CONFIGURACION-WINBOX.md](./GUIA-CONFIGURACION-WINBOX.md). Allí se detallan los menús de Winbox para:
 
-```routeros
-/interface bridge
-add name=bridge-lan comment="LAN Colegio Los Robles"
+- Crear `bridge-lan` y asignar `ether2`.
+- Configurar `192.168.88.1/24`.
+- Obtener la WAN por DHCP.
+- Configurar DNS y DHCP.
+- Crear NAT y firewall en el orden correcto.
+- Redirigir DNS por TCP/UDP 53.
+- Configurar Hotspot, TLS, RADIUS y perfiles de velocidad.
 
-/interface bridge port
-add bridge=bridge-lan interface=ether2
+La alternativa completa por comandos está en [CONFIGURACION-CLI-ROUTEROS.md](./CONFIGURACION-CLI-ROUTEROS.md). No se deben aplicar simultáneamente los dos procedimientos sobre un router ya configurado.
 
-/ip address
-add address=192.168.88.1/24 interface=bridge-lan comment="Gateway LAN"
-```
+### Evidencia de la configuración
 
-### 7.2 WAN y DNS
-
-```routeros
-/ip dhcp-client
-add interface=ether1 disabled=no comment="WAN por DHCP"
-
-/ip dns
-set allow-remote-requests=yes
-```
-
-En producción, utilizar resolutores autorizados y documentar la política de privacidad.
-
-### 7.3 DHCP
-
-```routeros
-/ip pool
-add name=pool-estudiantes ranges=192.168.88.4-192.168.88.99
-
-/ip dhcp-server
-add name=dhcp-lan interface=bridge-lan address-pool=pool-estudiantes lease-time=8h disabled=no
-
-/ip dhcp-server network
-add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=192.168.88.1 comment="Clientes LAN"
-```
-
-### 7.4 NAT y firewall
-
-```routeros
-/ip firewall nat
-add chain=srcnat out-interface=ether1 action=masquerade comment="NAT de salida a Internet"
-
-/ip firewall filter
-add chain=input action=accept connection-state=established,related comment="Aceptar conexiones existentes"
-add chain=input action=drop connection-state=invalid comment="Descartar conexiones inválidas"
-add chain=input action=accept protocol=udp dst-port=67,68 in-interface=bridge-lan comment="Permitir DHCP"
-add chain=input action=accept protocol=udp dst-port=53 in-interface=bridge-lan comment="Permitir DNS UDP local"
-add chain=input action=accept protocol=tcp dst-port=53 in-interface=bridge-lan comment="Permitir DNS TCP local"
-add chain=input action=drop in-interface=ether1 comment="Bloquear acceso entrante desde WAN"
-add chain=input action=drop comment="Denegar el resto del tráfico al router"
-
-/ip firewall filter
-add chain=forward action=accept connection-state=established,related comment="Forward de conexiones existentes"
-add chain=forward action=drop connection-state=invalid
-add chain=forward action=accept in-interface=bridge-lan out-interface=ether1 comment="Permitir salida LAN"
-add chain=forward action=drop comment="Denegar forward no autorizado"
-```
-
-El orden de las reglas es obligatorio. Las reglas de conexiones establecidas deben permanecer antes de los descartes generales.
-
-### 7.5 Redirección DNS
-
-```routeros
-/ip firewall nat
-add chain=dstnat in-interface=bridge-lan protocol=udp dst-port=53 action=redirect to-ports=53 comment="Forzar DNS UDP local"
-add chain=dstnat in-interface=bridge-lan protocol=tcp dst-port=53 action=redirect to-ports=53 comment="Forzar DNS TCP local"
-```
+Capturar en Winbox las interfaces, la dirección LAN, el cliente DHCP WAN, las concesiones DHCP y los contadores de firewall/NAT.
 
 ### Imagen recomendada 5: interfaces e IP de R-CORE
 
@@ -337,66 +283,17 @@ Capturar:
 
 ## 8. Configuración del AP OpenWrt
 
-El AP debe operar como puente. No debe competir con R-CORE por DHCP, NAT, DNS o enrutamiento.
+El AP debe operar como puente. No debe competir con R-CORE por DHCP, NAT, DNS o enrutamiento. La configuración específica por consola y LuCI se encuentra en [Paso_8_Configuracion_OpenWrt_AP.md](./Paso_8_Configuracion_OpenWrt_AP.md).
 
-### 8.1 Configuración por consola
+Para el informe del laboratorio, registrar mediante capturas de LuCI:
 
-```sh
-passwd
+- IP estática `192.168.88.2/24`.
+- Gateway y DNS `192.168.88.1`.
+- Bridge `br-lan` con el puerto hacia SW-LAN.
+- DHCP local deshabilitado.
+- Firewall y NAT local deshabilitados.
 
-uci set network.lan.proto='static'
-uci set network.lan.ipaddr='192.168.88.2'
-uci set network.lan.netmask='255.255.255.0'
-uci set network.lan.gateway='192.168.88.1'
-uci set network.lan.dns='192.168.88.1'
-uci set network.lan.device='br-lan'
-uci set dhcp.lan.ignore='1'
-uci commit network
-uci commit dhcp
-
-/etc/init.d/dnsmasq stop
-/etc/init.d/dnsmasq disable
-/etc/init.d/firewall stop
-/etc/init.d/firewall disable
-/etc/init.d/network restart
-```
-
-### 8.2 Bridge `br-lan`
-
-Comprobar los puertos:
-
-```sh
-uci show network | grep -E 'br-lan|eth0|eth1'
-bridge link
-```
-
-El bridge debe contener el puerto hacia SW-LAN. Si se utiliza el segundo adaptador para un cliente, también debe contener `eth1`.
-
-### 8.3 Configuración mediante LuCI
-
-1. Acceder a `http://192.168.88.2`.
-2. Ir a **Network > Interfaces**.
-3. Editar la interfaz **LAN**.
-4. Seleccionar **Static address**.
-5. Configurar IP `192.168.88.2`, máscara `/24`, gateway y DNS `192.168.88.1`.
-6. En **Device** o **Physical Settings**, seleccionar `br-lan`.
-7. Asociar `eth0` y `eth1` cuando corresponda.
-8. Activar **Ignore interface** en el servidor DHCP.
-9. Deshabilitar NAT y reglas de firewall que conviertan al AP en router.
-10. Aplicar los cambios manteniendo abierta la consola QEMU.
-
-### 8.4 SSID y WPA3
-
-Una VM OpenWrt normalmente no expone una radio inalámbrica. En ese caso, el laboratorio valida solo el bridge Ethernet. Si se utiliza hardware compatible:
-
-- SSID: `LosRobles_WiFi`.
-- Modo: Access Point.
-- Red: `lan`.
-- Cifrado: WPA3-SAE.
-- Clave: robusta, única y fuera del repositorio.
-- Canal y ancho: conforme al plan de radio.
-
-No se debe declarar que WPA3 fue validado si la VM no tiene una radio compatible.
+Si se usa una radio compatible, configurar el SSID `LosRobles_WiFi` con WPA3-SAE. Una VM QEMU con interfaces Ethernet no constituye una validación de WPA3.
 
 ### Imagen recomendada 7: configuración de red OpenWrt
 
@@ -428,12 +325,18 @@ o una vista de LuCI donde se observen los puertos del bridge.
 
 ### 9.1 Hotspot y certificado
 
-1. Importar el certificado y la clave privada desde **Files**.
-2. Ejecutar **IP > Hotspot > Hotspot Setup**.
-3. Seleccionar `bridge-lan`.
-4. Utilizar un pool exclusivo que no se solape con DHCP.
-5. Seleccionar el certificado TLS.
-6. Definir un DNS name, por ejemplo `login.losrobles.edu`.
+La implementación principal se realizó con Winbox:
+
+1. Ir a **System > Certificates**.
+2. Crear y firmar una CA local llamada `CA-LosRobles`.
+3. Crear una plantilla de servidor llamada `Hotspot-LosRobles`.
+4. Usar como **Common Name** y **Subject Alt. Name** el DNS del portal, por ejemplo `login.losrobles.edu`.
+5. Firmar el certificado de servidor usando `CA-LosRobles`.
+6. Ir a **IP > Hotspot > Server Profiles** y seleccionar `Hotspot-LosRobles` en **SSL Certificate**.
+7. Ejecutar **IP > Hotspot > Hotspot Setup**, seleccionar `bridge-lan`, un pool exclusivo y el DNS name `login.losrobles.edu`.
+8. Exportar solamente el certificado público de la CA e instalarlo en el cliente del laboratorio para evitar la advertencia del navegador.
+
+El procedimiento gráfico detallado, incluida la alternativa de importar un certificado externo, está en la sección 11 de [GUIA-CONFIGURACION-WINBOX.md](./GUIA-CONFIGURACION-WINBOX.md). El procedimiento equivalente por CLI está en [CONFIGURACION-CLI-ROUTEROS.md](./CONFIGURACION-CLI-ROUTEROS.md).
 
 Las claves privadas no deben almacenarse en el repositorio.
 
@@ -602,6 +505,10 @@ _Figura 1. Topología implementada en GNS3._
 - Direcciones IP públicas o datos de infraestructura real.
 - Capturas repetidas que no demuestren una configuración o resultado.
 
+### 11.5 Referencia para certificados
+
+El procedimiento de creación, firma, exportación de la CA e integración con Hotspot se documenta en [GUIA-CONFIGURACION-WINBOX.md](./GUIA-CONFIGURACION-WINBOX.md). Está basado en la documentación oficial de [Certificates - RouterOS](https://help.mikrotik.com/docs/spaces/ROS/pages/2555969/Certificates).
+
 ---
 
 ## 12. Solución de problemas
@@ -642,5 +549,6 @@ _Figura 1. Topología implementada en GNS3._
 ## 14. Documentos relacionados
 
 - [README.md](./README.md): guía rápida y estructura general del proyecto.
-- [GUIA-CONFIGURACION-WINBOX.md](./GUIA-CONFIGURACION-WINBOX.md): configuración gráfica detallada de MikroTik.
+- [GUIA-CONFIGURACION-WINBOX.md](./GUIA-CONFIGURACION-WINBOX.md): configuración gráfica detallada de MikroTik, incluido el certificado TLS del Hotspot.
+- [CONFIGURACION-CLI-ROUTEROS.md](./CONFIGURACION-CLI-ROUTEROS.md): configuración equivalente mediante comandos de RouterOS.
 - [Paso_8_Configuracion_OpenWrt_AP.md](./Paso_8_Configuracion_OpenWrt_AP.md): instalación y configuración específica de OpenWrt.

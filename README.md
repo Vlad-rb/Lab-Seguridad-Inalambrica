@@ -4,7 +4,7 @@ Guía de laboratorio para implementar una red inalámbrica segura para el Colegi
 
 > **Importante:** GNS3 valida el direccionamiento, el enrutamiento, el firewall, el DHCP, el portal cautivo, RADIUS, QoS y el funcionamiento del AP como puente. Una VM OpenWrt con interfaces Ethernet no emula por sí sola la cobertura, interferencia, roaming ni la negociación WPA3 de una radio física. Esas características deben validarse con hardware compatible.
 
-Para la documentación formal completa, incluyendo el procedimiento, las pruebas y las recomendaciones para insertar evidencias visuales, consulte [DOCUMENTACION-LABORATORIO.md](./DOCUMENTACION-LABORATORIO.md).
+Para la documentación formal completa, incluyendo el procedimiento, las pruebas y las recomendaciones para insertar evidencias visuales, consulte [DOCUMENTACION-LABORATORIO.md](./DOCUMENTACION-LABORATORIO.md). La implementación principal del laboratorio se realizó con [GUIA-CONFIGURACION-WINBOX.md](./GUIA-CONFIGURACION-WINBOX.md); la variante por comandos está en [CONFIGURACION-CLI-ROUTEROS.md](./CONFIGURACION-CLI-ROUTEROS.md).
 
 ## Índice
 

@@ -267,17 +267,62 @@ No utilizar las MAC de esta guía. La opción **ARP = reply-only** solo debe act
 
 ## 11. Hotspot y portal cautivo
 
-### 11.1 Importar certificado TLS
+### 11.1 Crear un certificado autofirmado desde Winbox
 
-1. Abrir **Files**.
-2. Arrastrar al router el certificado `.crt` y la clave privada `.key`.
-3. Ir a **System > Certificates**.
-4. Pulsar **Import** para cada archivo.
-5. Confirmar que el certificado aparezca como válido y con clave privada asociada.
+Para el laboratorio se puede crear una CA local y un certificado de servidor directamente en RouterOS. Esta opción no requiere generar previamente archivos `.crt` y `.key`.
 
-No subir certificados privados al repositorio GitHub.
+1. Ir a **System > Certificates**.
+2. Pulsar **+** para crear una plantilla de CA:
+   - **Name:** `CA-LosRobles`
+   - **Common Name:** `CA-LosRobles`
+   - **Days Valid:** `365` o el periodo definido para el laboratorio.
+   - **Key Usage:** seleccionar `key-cert-sign` y `crl-sign`.
+   - Definir organización, país y demás campos si se requieren.
+3. Pulsar **Apply** y **OK**.
+4. Seleccionar `CA-LosRobles`, pulsar **Sign** y confirmar la firma como certificado raíz.
+5. Crear otra plantilla con **+**:
+   - **Name:** `Hotspot-LosRobles`
+   - **Common Name:** el nombre DNS que se usará en el portal, por ejemplo `login.losrobles.edu`.
+   - **Subject Alt. Name:** agregar `DNS:login.losrobles.edu`. Si el laboratorio accederá por IP, agregar también `IP:192.168.88.1`.
+   - **Key Usage:** `digital-signature`, `key-encipherment` y `tls-server`.
+   - Usar el mismo periodo de validez y un algoritmo seguro, preferiblemente SHA-256.
+6. Pulsar **Apply** y **OK**.
+7. Seleccionar `Hotspot-LosRobles`, pulsar **Sign**, elegir `CA-LosRobles` como **CA Certificate** y confirmar.
+8. En la lista de certificados, comprobar que:
+   - `CA-LosRobles` tenga la marca de autoridad.
+   - `Hotspot-LosRobles` tenga clave privada y aparezca como emitido por la CA.
+   - Ambos estén vigentes.
+9. Seleccionar cada certificado, abrir **Set** o sus propiedades y marcar **Trusted** cuando RouterOS lo solicite para el servicio.
 
-### 11.2 Ejecutar el asistente Hotspot
+Los nombres de botones pueden variar ligeramente según la versión de Winbox. RouterOS elimina la plantilla después de firmarla; el certificado firmado es el que debe utilizarse.
+
+Este flujo corresponde al administrador de certificados de RouterOS 7. Para consultar las propiedades disponibles de las plantillas, nombres alternativos, usos de clave y confianza, consulte la [documentación oficial de certificados de RouterOS](https://help.mikrotik.com/docs/spaces/ROS/pages/2555969/Certificates).
+
+### 11.2 Asociar el certificado al Hotspot
+
+1. Ir a **IP > Hotspot > Server Profiles**.
+2. Abrir el perfil que utiliza el Hotspot.
+3. En **SSL Certificate**, seleccionar `Hotspot-LosRobles`.
+4. En **Login By**, activar `https` y conservar `http-chap` solo si se necesita compatibilidad durante las pruebas.
+5. Pulsar **Apply** y **OK**.
+6. Confirmar que el **DNS Name** del Hotspot coincide exactamente con el **Common Name** y el **Subject Alt. Name** del certificado.
+7. Desde el cliente, resolver el nombre hacia `192.168.88.1` y abrir `https://login.losrobles.edu`.
+
+Un certificado autofirmado no es confiable automáticamente para Firefox u otros clientes. Para eliminar la advertencia, seleccionar la CA `CA-LosRobles` en **System > Certificates**, utilizar **Export** y descargar únicamente el certificado público `.crt`. Instalar esa CA como autoridad de confianza en el cliente de laboratorio. Nunca exportar ni publicar la clave privada del certificado de servidor.
+
+### 11.3 Importar un certificado externo
+
+Si se utiliza un certificado emitido por una CA institucional o pública:
+
+1. Subir al router, desde **Files**, el certificado y su clave privada protegida.
+2. Ir a **System > Certificates > Import**.
+3. Importar el certificado, la clave y la cadena intermedia si corresponde.
+4. Confirmar que el certificado tenga clave privada y nombre DNS correcto.
+5. Asociarlo al perfil del Hotspot como se explica arriba.
+
+No subir certificados privados, claves, contraseñas ni archivos de importación al repositorio GitHub.
+
+### 11.4 Ejecutar el asistente Hotspot
 
 1. Ir a **IP > Hotspot**.
 2. Pulsar **Hotspot Setup**.
@@ -289,7 +334,7 @@ No subir certificados privados al repositorio GitHub.
 8. Crear temporalmente un usuario local de prueba.
 9. Pulsar **Next** hasta terminar.
 
-### 11.3 Activar RADIUS en Hotspot
+### 11.5 Activar RADIUS en Hotspot
 
 1. Ir a **Radius > +**.
 2. En **Address**, escribir `127.0.0.1` si User Manager está en el mismo RouterOS.
