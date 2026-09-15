@@ -1,13 +1,13 @@
 # Guía de configuración MikroTik con Winbox
 
-Guía gráfica para configurar los equipos MikroTik del proyecto **Colegio Los Robles** mediante **Winbox** y RouterOS 7.x.
+Guía gráfica para configurar el router MikroTik del proyecto **Colegio Los Robles** mediante **Winbox** y RouterOS 7.x. El procedimiento del AP OpenWrt está separado en [Paso_8_Configuracion_OpenWrt_AP.md](./Paso_8_Configuracion_OpenWrt_AP.md).
 
 ## 1. Alcance y precauciones
 
 Esta guía cubre:
 
 - Router principal `R-CORE`.
-- AP MikroTik `AP-01` en modo bridge.
+- AP `AP-01` en modo bridge cuando se utilice un segundo MikroTik.
 - DHCP, NAT, firewall, DNS, Hotspot, RADIUS, QoS y registros.
 
 Antes de comenzar:
@@ -429,4 +429,3 @@ En **IP > Firewall**, revisar los contadores de reglas. En **IP > Hotspot > Acti
 - [ ] El AP trabaja como bridge, sin DHCP ni doble NAT.
 - [ ] Los eventos de firewall, Hotspot y RADIUS aparecen en los logs.
 - [ ] Se guardó un export sanitizado sin secretos.
-

@@ -1,382 +1,260 @@
-# Colegio Los Robles — Red inalámbrica segura en GNS3
+# Red inalámbrica segura en GNS3
 
-Propuesta técnica y guía de implementación para emular en Linux una red inalámbrica segura, segmentada y con control de calidad de servicio para el Colegio Los Robles.
+Guía de laboratorio para implementar una red inalámbrica segura para el Colegio Los Robles utilizando GNS3, MikroTik RouterOS y un AP virtual OpenWrt.
 
-## 1. Resumen ejecutivo
+> **Importante:** GNS3 valida el direccionamiento, el enrutamiento, el firewall, el DHCP, el portal cautivo, RADIUS, QoS y el funcionamiento del AP como puente. Una VM OpenWrt con interfaces Ethernet no emula por sí sola la cobertura, interferencia, roaming ni la negociación WPA3 de una radio física. Esas características deben validarse con hardware compatible.
 
-El colegio cuenta con más de 1.000 usuarios entre estudiantes, docentes y personal administrativo. La red actual presenta interrupciones durante las horas lectivas, saturación de los enlaces e intentos de acceso no autorizado a los servicios institucionales.
+Para la documentación formal completa, incluyendo el procedimiento, las pruebas y las recomendaciones para insertar evidencias visuales, consulte [DOCUMENTACION-LABORATORIO.md](./DOCUMENTACION-LABORATORIO.md).
 
-La solución propuesta utiliza **GNS3 sobre Linux** para emular un perímetro de red MikroTik RouterOS, un punto de acceso virtual y clientes de prueba. El diseño centraliza el enrutamiento, DHCP, firewall, portal cautivo, autenticación RADIUS, control de ancho de banda y auditoría.
+## Índice
 
-> **Alcance de la emulación:** GNS3 valida la lógica de red y las políticas de seguridad. La radiofrecuencia, la cobertura, la interferencia y el rendimiento físico WPA3 deben validarse posteriormente con equipos inalámbricos reales.
+1. [Objetivo y alcance](#1-objetivo-y-alcance)
+2. [Arquitectura](#2-arquitectura)
+3. [Direccionamiento](#3-direccionamiento)
+4. [Requisitos](#4-requisitos)
+5. [Preparación de imágenes](#5-preparación-de-imágenes)
+6. [Creación de la topología](#6-creación-de-la-topología)
+7. [Orden de implementación](#7-orden-de-implementación)
+8. [Configuración del AP OpenWrt](#8-configuración-del-ap-openwrt)
+9. [Validación](#9-validación)
+10. [Solución de problemas](#10-solución-de-problemas)
+11. [Seguridad y entregables](#11-seguridad-y-entregables)
 
-## 2. Objetivos
+## 1. Objetivo y alcance
 
-### Objetivo general
+El laboratorio representa una red para estudiantes, docentes y personal administrativo. El router centraliza:
 
-Diseñar, implementar y validar una arquitectura inalámbrica segura y administrable que garantice conectividad estable, autenticación centralizada y uso equitativo del ancho de banda.
+- WAN, NAT y gateway de la LAN.
+- DHCP y DNS para los clientes.
+- Firewall de entrada y reenvío.
+- Hotspot con portal cautivo HTTPS.
+- Autenticación RADIUS/User Manager.
+- Perfiles de velocidad: 10 Mbps para estudiantes y 30 Mbps para docentes.
+- Registro de eventos de firewall, Hotspot y RADIUS.
 
-### Objetivos específicos
+La primera versión utiliza una LAN común para simplificar la emulación. En producción se deben separar como mínimo las VLAN de estudiantes, docentes, servidores y gestión.
 
-- Separar el acceso de estudiantes del acceso administrativo.
-- Centralizar DHCP, NAT, firewall, Hotspot y políticas QoS en RouterOS.
-- Proteger el portal cautivo mediante HTTPS/TLS.
-- Autenticar usuarios con RADIUS/User Manager.
-- Limitar el consumo a **10 Mbps** para estudiantes y **30 Mbps** para docentes.
-- Registrar autenticaciones, bloqueos y eventos relevantes para auditoría.
-- Dejar preparada la topología para añadir APs y roaming posteriormente.
-
-## 3. Arquitectura propuesta
+## 2. Arquitectura
 
 ```text
-                    ┌─────────────────────┐
-                    │ Internet / NAT GNS3 │
-                    └──────────┬──────────┘
-                               │ WAN
-                    ┌──────────▼──────────┐
-                    │ MikroTik CHR Router │
-                    │ RouterOS 7.x        │
-                    │ NAT · FW · DHCP     │
-                    │ Hotspot · RADIUS    │
-                    └───────┬───────┬──────┘
-                            │       │ LAN/Bridge
-                ┌───────────▼─┐   ┌─▼────────────────┐
-                │ AP virtual  │   │ Webterm / cliente │
-                │ CHR/OpenWrt │   │ Firefox + CLI     │
-                └───────┬─────┘   └──────────────────┘
-                        │
-                SSID institucional
+                         +----------------------+
+                         | NAT / Internet GNS3  |
+                         +----------+-----------+
+                                    | ether1 (WAN)
+                         +----------v-----------+
+                         | R-CORE               |
+                         | MikroTik RouterOS 7  |
+                         | NAT, FW, DHCP, DNS   |
+                         | Hotspot, RADIUS, QoS |
+                         +----------+-----------+
+                                    | ether2
+                              +-----v------+
+                              | Switch LAN |
+                              +--+-------+-+
+                                 |       |
+                         +-------v-+   +-v----------+
+                         | AP-01   |   | CLIENTE-01 |
+                         | OpenWrt |   | Webterm    |
+                         | br-lan  |   +------------+
+                         +---------+
 ```
 
-### Componentes
+Conecte `eth0` de OpenWrt hacia el switch y `eth1` hacia un segundo cliente si se desea comprobar el puente L2. En una topología con un único enlace al switch, `eth1` puede quedar reservado para pruebas.
 
-| Componente | Tecnología | Función |
+## 3. Direccionamiento
+
+| Elemento | Dirección o rango | Uso |
 |---|---|---|
-| Host | Linux | Ejecutar GNS3, Docker/VMs y herramientas de prueba |
-| Orquestador | GNS3 | Crear enlaces, switches y nodos virtuales |
-| Router/core | MikroTik CHR RouterOS 7.x | Gateway, NAT, firewall, DHCP, Hotspot, QoS y RADIUS |
-| AP | MikroTik CHR u OpenWrt VM | Puente de acceso y emulación lógica de la WLAN |
-| Cliente | Webterm Docker/VM | Navegador, terminal y pruebas de políticas |
-| Identidad | User Manager/RADIUS | Autenticación y asignación de perfiles |
+| LAN | `192.168.88.0/24` | Red del laboratorio |
+| R-CORE | `192.168.88.1` | Gateway, DNS y Hotspot |
+| AP-01 | `192.168.88.2` | Gestión de OpenWrt |
+| Servidor interno | `192.168.88.3` | Dirección reservada |
+| Pool estudiantes | `192.168.88.4-192.168.88.99` | DHCP principal |
+| Pool administrativo | `192.168.88.100-192.168.88.200` | Reservado para una futura VLAN o reservas MAC |
+| WAN | DHCP de NAT GNS3 | Salida a Internet |
 
-## 4. Plan de direccionamiento
+No asigne el pool administrativo en la misma red de manera aleatoria. Para diferenciar perfiles automáticamente utilice VLAN/subred separada, reservas DHCP por MAC o autenticación Hotspot/RADIUS.
 
-| Uso | Red o rango | Gateway |
-|---|---|---|
-| LAN institucional | `192.168.88.0/24` | `192.168.88.1` |
-| Estudiantes/general | `192.168.88.4–192.168.88.99` | `192.168.88.1` |
-| Docentes/servidores | `192.168.88.100–192.168.88.200` | `192.168.88.1` |
-| Gestión del AP (reservada) | `192.168.88.2` | `192.168.88.1` |
-| Servidor interno (reservada) | `192.168.88.3` | `192.168.88.1` |
+## 4. Requisitos
 
-> Para una implementación física se recomienda separar estudiantes, docentes y servidores en VLAN/subredes distintas. En esta primera emulación se mantienen en una LAN común para simplificar el escenario y se diferencian mediante perfiles DHCP/RADIUS.
+### Host
 
-## 5. Requisitos previos
+- Linux con virtualización KVM habilitada.
+- GNS3 GUI y GNS3 Server.
+- CPU y memoria suficientes para dos VMs y un cliente Webterm.
+- Conectividad a Internet para descargar imágenes y paquetes.
 
-- Host Linux con virtualización habilitada (KVM recomendado).
-- GNS3 GUI y GNS3 server instalados.
-- Imagen legal de MikroTik CHR RouterOS 7.x.
-- Imagen de OpenWrt o segundo CHR para el AP.
-- Imagen Webterm con Firefox.
-- Certificado TLS y clave privada para el Hotspot.
-- Acceso administrativo inicial a RouterOS.
-- Enlace WAN simulado en GNS3 para probar NAT y DNS.
+### Imágenes y credenciales
 
-## 6. Implementación paso a paso
+- MikroTik CHR RouterOS 7.x, descargado desde la fuente oficial.
+- OpenWrt x86/64 para QEMU/KVM.
+- Webterm Docker o una VM Linux con navegador y herramientas `ip`, `dig`, `nslookup` e `iperf3`.
+- Certificado TLS para el Hotspot, únicamente en el entorno local.
+- Datos de una cuenta administrativa inicial y secreto RADIUS de laboratorio.
 
-### Paso 1 — Crear la topología en GNS3
+Nunca publique imágenes con licencias restringidas, certificados, claves privadas, contraseñas, exports sin sanitizar ni secretos RADIUS.
 
-1. Crear un proyecto llamado `colegio-los-robles`.
-2. Añadir un CHR como `R-CORE`, un CHR/OpenWrt como `AP-01` y un Webterm como `CLIENTE-01`.
-3. Añadir un switch Ethernet virtual para la LAN.
-4. Conectar:
-   - `R-CORE/WAN` al nodo NAT/Internet de GNS3.
-   - `R-CORE/LAN` al switch LAN.
-   - `AP-01` y `CLIENTE-01` al switch LAN.
-5. Iniciar los nodos y confirmar que las interfaces aparecen en RouterOS con `/interface print`.
+## 5. Preparación de imágenes
 
-### Paso 2 — Configurar interfaces y direccionamiento
+### 5.1 OpenWrt
 
-Identificar los nombres reales de las interfaces antes de ejecutar los comandos. En el ejemplo, `ether1` es WAN y `ether2` es LAN.
+1. Descargue la imagen x86/64 **Combined ext4** desde `https://downloads.openwrt.org/`.
+2. Elija la versión estable y la ruta `targets/x86/64/`.
+3. Descargue el archivo `openwrt-x86-64-generic-ext4-combined.img.gz` o el nombre equivalente de la versión elegida.
+4. Verifique el checksum publicado por OpenWrt.
+5. Descomprima el archivo para obtener un `.img`.
 
-```routeros
-/interface bridge
-add name=bridge-lan comment="LAN Colegio Los Robles"
-
-/interface bridge port
-add bridge=bridge-lan interface=ether2
-
-/ip address
-add address=192.168.88.1/24 interface=bridge-lan comment="Gateway LAN"
-
-/ip dhcp-client
-add interface=ether1 disabled=no comment="WAN por DHCP"
-
-/ip dns
-set allow-remote-requests=yes
-```
-
-### Paso 3 — Configurar DHCP
-
-```routeros
-/ip pool
-add name=pool-estudiantes ranges=192.168.88.4-192.168.88.99
-add name=pool-administrativo ranges=192.168.88.100-192.168.88.200
-
-/ip dhcp-server
-add name=dhcp-lan interface=bridge-lan address-pool=pool-estudiantes lease-time=8h disabled=no
-
-/ip dhcp-server network
-add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=192.168.88.1 \
-    comment="Clientes LAN"
-```
-
-Las direcciones `192.168.88.2` y `192.168.88.3` quedan fuera del pool para reservarlas al AP y al servidor interno. Si se requiere entregar el pool administrativo automáticamente, debe utilizarse una segunda VLAN/subred o reservas DHCP asociadas a MAC; no se deben mezclar dos pools en la misma red sin una política clara de asignación.
-
-### Paso 4 — Configurar NAT y firewall
-
-Primero establecer una política mínima de protección. El orden de las reglas es importante: las conexiones establecidas deben aceptarse antes de descartar tráfico nuevo.
-
-```routeros
-/ip firewall nat
-add chain=srcnat out-interface=ether1 action=masquerade \
-    comment="NAT de salida a Internet"
-
-/ip firewall filter
-add chain=input action=accept connection-state=established,related \
-    comment="Aceptar conexiones existentes"
-add chain=input action=drop connection-state=invalid \
-    comment="Descartar conexiones inválidas"
-add chain=input action=accept protocol=udp dst-port=67,68 \
-    in-interface=bridge-lan comment="Permitir DHCP"
-add chain=input action=accept protocol=udp dst-port=53 \
-    in-interface=bridge-lan comment="Permitir DNS UDP local"
-add chain=input action=accept protocol=tcp dst-port=53 \
-    in-interface=bridge-lan comment="Permitir DNS TCP local"
-add chain=input action=drop protocol=icmp dst-address=192.168.88.1 \
-    comment="Ocultar gateway frente a ping"
-add chain=input action=drop in-interface=ether1 \
-    comment="Bloquear acceso entrante desde WAN"
-add chain=input action=drop comment="Denegar el resto del tráfico al router"
-
-/ip firewall filter
-add chain=forward action=accept connection-state=established,related \
-    comment="Forward de conexiones existentes"
-add chain=forward action=drop connection-state=invalid
-add chain=forward action=accept in-interface=bridge-lan out-interface=ether1 \
-    comment="Permitir salida LAN"
-add chain=forward action=drop comment="Denegar forward no autorizado"
-```
-
-### Paso 5 — Forzar DNS seguro
-
-El DNS tradicional utiliza los puertos TCP/UDP 53. La redirección debe aplicarse a esos puertos; un puerto aleatorio no constituye una consulta DNS estándar.
-
-```routeros
-/ip firewall nat
-add chain=dstnat in-interface=bridge-lan protocol=udp dst-port=53 \
-    action=redirect to-ports=53 comment="Forzar DNS UDP local"
-add chain=dstnat in-interface=bridge-lan protocol=tcp dst-port=53 \
-    action=redirect to-ports=53 comment="Forzar DNS TCP local"
-```
-
-Si se utiliza un resolutor externo con filtrado, se puede sustituir `redirect` por `dst-nat` hacia la IP y el puerto del servidor autorizado. Debe documentarse el proveedor, la política de privacidad y la disponibilidad del servicio.
-
-### Paso 6 — Proteger el acceso ARP
-
-Asignar entradas estáticas únicamente a equipos con IP fija y MAC verificadas:
-
-```routeros
-/ip arp
-add address=192.168.88.2 mac-address=AA:BB:CC:DD:EE:02 \
-    interface=bridge-lan comment="AP-01"
-add address=192.168.88.3 mac-address=AA:BB:CC:DD:EE:03 \
-    interface=bridge-lan comment="Servidor interno"
-```
-
-No se deben copiar estas MAC de ejemplo. Sustituirlas por los valores observados con `/ip arp print` y validar primero la conectividad. En una red con muchos clientes dinámicos, `arp=reply-only` debe habilitarse solo después de disponer de reservas DHCP y entradas ARP para todos los equipos autorizados.
-
-### Paso 7 — Configurar Hotspot, TLS y RADIUS
-
-1. Importar el certificado y la clave privada:
-
-```routeros
-/certificate import file-name=hotspot-los-robles.crt
-/certificate import file-name=hotspot-los-robles.key
-/certificate print
-```
-
-2. Ejecutar el asistente y seleccionar `bridge-lan`:
-
-```routeros
-/ip hotspot setup
-```
-
-Seleccionar la dirección `192.168.88.1/24`, un pool que no se solape con los pools DHCP, el certificado importado y un DNS name institucional, por ejemplo `login.losrobles.edu`.
-
-3. Habilitar el uso de RADIUS:
-
-```routeros
-/radius
-add address=127.0.0.1 service=hotspot secret="CAMBIAR_SECRET_RADIUS"
-
-/ip hotspot profile
-set [find default=yes] use-radius=yes login-by=https,http-chap
-```
-
-El secreto debe reemplazarse y mantenerse fuera del repositorio. En un entorno real, el certificado debe ser emitido por una autoridad confiable y los clientes deben resolver el nombre DNS correspondiente.
-
-4. Crear perfiles de velocidad:
-
-```routeros
-/ip hotspot user profile
-add name=estudiante rate-limit=10M/10M shared-users=1 \
-    comment="Perfil estudiante"
-add name=docente rate-limit=30M/30M shared-users=1 \
-    comment="Perfil docente"
-```
-
-Crear los usuarios en User Manager/RADIUS y asociarlos al perfil correspondiente. Verificar la sintaxis y el método de integración según la versión exacta de RouterOS/User Manager instalada.
-
-### Paso 8 — Configurar el AP virtual
-
-- Asignar a `AP-01` la IP de gestión `192.168.88.2/24` y gateway `192.168.88.1`.
-- Crear un bridge entre la interfaz LAN y la interfaz inalámbrica virtual.
-- Desactivar DHCP/NAT en el AP para evitar doble NAT.
-- Configurar el SSID institucional, canal y ancho de canal de **20/40 MHz**.
-- Seleccionar WPA3-SAE si la imagen virtual soporta el modo inalámbrico. Si la plataforma solo ofrece bridge Ethernet, documentar WPA3 como requisito de la futura capa física, no como una capacidad realmente emulada.
-- Utilizar una clave robusta y no almacenarla en este repositorio.
-
-### Paso 9 — Habilitar auditoría
-
-```routeros
-/system logging
-add topics=firewall action=memory
-add topics=hotspot,account action=memory
-add topics=radius action=memory
-
-/log print
-```
-
-Para producción, enviar los registros a un syslog remoto con retención, control de acceso y sincronización NTP. No guardar contraseñas ni secretos en los logs.
-
-## 7. Protocolo de pruebas
-
-Registrar fecha, usuario, IP, resultado esperado, resultado observado y evidencia (captura o salida de consola).
-
-### 7.1 Firewall del gateway
-
-Desde Webterm:
+Ejemplo en Linux:
 
 ```bash
-ping -c 4 192.168.88.1
+sha256sum openwrt-x86-64-generic-ext4-combined.img.gz
+gunzip openwrt-x86-64-generic-ext4-combined.img.gz
 ```
 
-**Resultado esperado:** timeout o paquetes filtrados. La administración debe probarse desde una interfaz y una cuenta de gestión autorizadas, no mediante ICMP.
+El nombre exacto puede cambiar entre versiones; utilice siempre el archivo correspondiente a `x86/64` y documente la versión usada.
 
-### 7.2 DHCP y conectividad
+### 5.2 MikroTik CHR
+
+1. Descargue la imagen CHR compatible con QEMU desde el sitio oficial de MikroTik.
+2. Verifique la licencia y el checksum.
+3. Importe la imagen en GNS3 como VM QEMU.
+4. Asigne al menos dos adaptadores: WAN y LAN.
+
+### 5.3 Plantillas en GNS3
+
+En **Edit > Preferences > QEMU VMs > New**:
+
+- `OpenWrt-AP`: 256 MB de RAM, dos adaptadores VirtIO y la imagen `.img`.
+- `R-CORE`: memoria según la imagen CHR, dos adaptadores VirtIO.
+- Cliente: Webterm o VM con navegador.
+
+En cada VM confirme el orden de interfaces antes de cablear. El nombre `eth0` debe documentarse como el puerto conectado a R-CORE y `eth1` como el puerto de prueba.
+
+## 6. Creación de la topología
+
+1. Cree un proyecto llamado `colegio-los-robles`.
+2. Añada un nodo NAT de GNS3, `R-CORE`, `AP-01`, un switch Ethernet y `CLIENTE-01`.
+3. Conecte:
+   - NAT GNS3 a `R-CORE/ether1`.
+   - `R-CORE/ether2` al switch.
+   - `AP-01/eth0` al switch.
+   - `CLIENTE-01` al switch.
+4. Inicie primero el switch, después `R-CORE`, OpenWrt y el cliente.
+5. Abra las consolas y confirme las interfaces con `/interface print` en RouterOS y `ip link` en OpenWrt.
+
+## 7. Orden de implementación
+
+Realice los cambios en este orden para evitar perder acceso:
+
+1. Cambie las credenciales iniciales y haga un respaldo.
+2. Configure el bridge LAN y la IP `192.168.88.1/24` en R-CORE.
+3. Configure WAN por DHCP, DNS, DHCP, NAT y firewall.
+4. Configure OpenWrt como bridge con la IP `192.168.88.2`.
+5. Compruebe que el cliente recibe DHCP y tiene salida a Internet.
+6. Configure Hotspot, certificado TLS y RADIUS.
+7. Cree los perfiles `estudiante` y `docente`.
+8. Active los registros y ejecute la matriz de pruebas.
+
+La configuración gráfica completa del router está en [GUIA-CONFIGURACION-WINBOX.md](./GUIA-CONFIGURACION-WINBOX.md). La configuración específica del AP está en [Paso_8_Configuracion_OpenWrt_AP.md](./Paso_8_Configuracion_OpenWrt_AP.md).
+
+## 8. Configuración del AP OpenWrt
+
+OpenWrt funciona en modo **bridge transparente**: no entrega DHCP, no hace NAT y no enruta a Internet. Todo el tráfico pasa hacia R-CORE.
+
+Desde la consola de OpenWrt:
+
+```sh
+# Sustituir eth0/eth1 si la VM muestra otros nombres.
+uci set network.lan.proto='static'
+uci set network.lan.ipaddr='192.168.88.2'
+uci set network.lan.netmask='255.255.255.0'
+uci set network.lan.gateway='192.168.88.1'
+uci set network.lan.dns='192.168.88.1'
+uci set dhcp.lan.ignore='1'
+uci commit network
+uci commit dhcp
+/etc/init.d/dnsmasq disable
+/etc/init.d/dnsmasq stop
+/etc/init.d/firewall disable
+/etc/init.d/firewall stop
+```
+
+En versiones modernas de OpenWrt, compruebe en LuCI que el dispositivo `br-lan` tenga como puertos `eth0` y `eth1`. Si no existe, créelo en **Network > Interfaces > Devices** como bridge y asócielo a la interfaz LAN. No reinicie la red hasta confirmar que el puerto de administración está conectado.
+
+La configuración completa, alternativa por LuCI, SSID y comprobaciones se encuentra en [Paso_8_Configuracion_OpenWrt_AP.md](./Paso_8_Configuracion_OpenWrt_AP.md).
+
+## 9. Validación
+
+### Cliente
 
 ```bash
 ip addr
 ip route
 nslookup example.com 192.168.88.1
+dig @192.168.88.1 example.com
 ```
 
-**Resultado esperado:** dirección dentro del pool correcto, gateway `192.168.88.1` y resolución DNS funcional.
+Debe recibir una dirección entre `192.168.88.4` y `192.168.88.99`, gateway `192.168.88.1` y resolución DNS.
 
-### 7.3 Redirección DNS
+### OpenWrt
 
-```bash
-dig @8.8.8.8 example.com
+```sh
+ip addr show br-lan
+ip route
+bridge link
+ping -c 4 192.168.88.1
 ```
 
-En RouterOS revisar contadores:
+La IP de gestión debe ser `192.168.88.2/24`. `bridge link` debe mostrar los puertos asociados a `br-lan`.
+
+### RouterOS
 
 ```routeros
+/interface print
+/ip dhcp-server lease print
 /ip firewall nat print stats
+/ip firewall filter print stats
+/ip hotspot active print
+/log print
 ```
 
-**Resultado esperado:** la consulta TCP/UDP 53 es interceptada y procesada por el resolutor autorizado. No debe aceptarse como prueba DNS un puerto arbitrario que no sea 53, salvo que se documente explícitamente un protocolo alternativo.
+Compruebe que WAN esté activa, que el cliente tenga una concesión, que los contadores de NAT/firewall aumenten y que las sesiones Hotspot se registren.
 
-### 7.4 Portal cautivo y autenticación
+### Portal, RADIUS y QoS
 
-1. Abrir Firefox en Webterm.
-2. Navegar a un sitio HTTP de prueba.
-3. Confirmar la redirección al portal HTTPS.
-4. Iniciar sesión con un usuario de prueba de estudiante.
-5. Repetir con un usuario docente.
-6. Verificar en `/log print` los eventos de autenticación.
-
-**Resultado esperado:** usuarios válidos acceden con su perfil; credenciales inválidas son rechazadas y registradas.
-
-### 7.5 QoS
-
-Ejecutar un test de velocidad o `iperf3` contra un servidor de prueba controlado:
+1. Navegue desde el cliente a un sitio HTTP de prueba.
+2. Confirme la redirección al portal HTTPS.
+3. Pruebe una cuenta de estudiante y otra de docente.
+4. Ejecute `iperf3` contra un servidor controlado:
 
 ```bash
 iperf3 -c IP_SERVIDOR_PRUEBAS -t 30
 ```
 
-**Resultado esperado:** el perfil estudiante no supera aproximadamente 10 Mbps y el perfil docente no supera aproximadamente 30 Mbps. Repetir varias veces y considerar la sobrecarga del laboratorio; los límites son máximos configurados, no una garantía de velocidad mínima.
+El perfil estudiante no debe superar aproximadamente 10 Mbps y el docente aproximadamente 30 Mbps. Las mediciones del laboratorio no representan una garantía de velocidad física.
 
-### 7.6 Seguridad negativa
+## 10. Solución de problemas
 
-- Intentar acceder a la administración desde WAN.
-- Usar credenciales inválidas.
-- Intentar resolver DNS directamente sin pasar por el gateway.
-- Revisar que el tráfico no autorizado aparezca en los logs.
-
-## 8. Criterios de aceptación
-
-- [ ] Todos los nodos arrancan y la topología está documentada en GNS3.
-- [ ] El cliente recibe una dirección del rango esperado.
-- [ ] El NAT permite salida a Internet sin exponer la administración.
-- [ ] El ping al gateway es bloqueado según la política.
-- [ ] Las consultas DNS son forzadas al resolutor autorizado.
-- [ ] El portal cautivo utiliza HTTPS/TLS válido.
-- [ ] RADIUS autentica y asigna los perfiles correctos.
-- [ ] El perfil estudiante queda limitado a 10/10 Mbps.
-- [ ] El perfil docente queda limitado a 30/30 Mbps.
-- [ ] Los eventos relevantes aparecen en los registros.
-- [ ] No hay contraseñas, claves privadas ni secretos en el repositorio.
-
-## 9. Operación, ampliación y mantenimiento
-
-### Roaming y crecimiento
-
-Para añadir APs, reutilizar el mismo servicio RADIUS y definir una estrategia de canales no solapados. En una implementación real se deben separar las VLAN de estudiantes, docentes, servidores y gestión, además de utilizar un controlador o una solución de roaming compatible.
-
-### Copias de seguridad y cambios
-
-Antes de cada cambio:
-
-```routeros
-/export file=backup-antes-del-cambio
-/system backup save name=backup-binario-antes-del-cambio
-```
-
-Guardar los respaldos fuera del repositorio y protegerlos con control de acceso. Probar la restauración en un laboratorio antes de aplicarla en producción.
-
-### Riesgos y mitigaciones
-
-| Riesgo | Mitigación |
+| Síntoma | Comprobaciones |
 |---|---|
-| Recursos insuficientes del host | Asignar RAM/CPU según la carga y apagar nodos no usados |
-| Certificado TLS inválido | Usar nombre DNS estable y certificado confiable |
-| Doble NAT en el AP | Operar el AP en modo bridge |
-| Solapamiento de pools | Reservar IPs de infraestructura y documentar rangos |
-| Falsa sensación de WPA3 | Validar WPA3 con hardware o una VM que soporte radio virtual |
-| Pérdida de trazabilidad | Centralizar logs y sincronizar hora con NTP |
+| OpenWrt no responde en `192.168.88.2` | Revisar cableado, `ip addr`, bridge, máscara y gateway. Conectar por consola antes de reiniciar la red. |
+| Cliente no recibe DHCP | Confirmar que solo R-CORE tenga DHCP activo y que `eth0`/`eth1` estén dentro de `br-lan`. |
+| Hay doble NAT | Eliminar masquerade, DHCP y firewall de OpenWrt; el único NAT debe estar en R-CORE. |
+| Hay Internet pero no portal | Revisar Hotspot, DNS name, certificado, pool exclusivo y estado de la interfaz `bridge-lan`. |
+| RADIUS rechaza usuarios | Revisar dirección, secreto, servicio Hotspot, hora del sistema y logs de ambos extremos. |
+| QoS no coincide | Confirmar el perfil activo y repetir la prueba contra un servidor local, sin tráfico concurrente. |
+| WPA3 no aparece | La VM probablemente no tiene radio. Documentar el bridge y validar WPA3 con hardware real. |
 
-## 10. Entregables finales
+## 11. Seguridad y entregables
 
-1. Proyecto GNS3 exportado (`.gns3project`).
-2. Este documento `README.md`.
-3. Diagrama de topología y tabla de direccionamiento.
-4. Export sanitizado de la configuración RouterOS.
-5. Matriz de pruebas con evidencias.
-6. Informe de resultados, limitaciones y recomendaciones para producción.
+Antes de entregar el laboratorio:
 
-## 11. Conclusión
+- [ ] Cambiar contraseñas iniciales y usar secretos únicos.
+- [ ] No guardar claves TLS, secretos RADIUS ni contraseñas en Git.
+- [ ] Exportar RouterOS solo después de sanitizarlo.
+- [ ] Verificar que la administración no sea accesible desde WAN.
+- [ ] Mantener respaldos fuera del repositorio.
+- [ ] Registrar versión de GNS3, RouterOS, OpenWrt, imágenes y fecha de pruebas.
+- [ ] Adjuntar evidencias de DHCP, NAT, portal, RADIUS, QoS y logs.
 
-La arquitectura propuesta aborda la inestabilidad, la saturación y los riesgos de acceso no autorizado mediante una administración centralizada, autenticación RADIUS, portal cautivo TLS, firewall, DNS controlado, límites de velocidad y auditoría. La emulación permite validar la lógica antes de invertir en infraestructura física; la validación de cobertura, capacidad radioeléctrica y WPA3 debe completarse en una segunda fase con equipos reales.
+El resultado esperado es una emulación reproducible de la lógica de red. Para producción todavía deben planificarse VLAN, cobertura, canales, capacidad, certificados confiables, monitoreo, redundancia y validación WPA3 con AP físico.
