@@ -68,7 +68,7 @@ Conecte `eth0` de OpenWrt hacia el switch y `eth1` hacia un segundo cliente si s
 | LAN | `192.168.88.0/24` | Red del laboratorio |
 | R-CORE | `192.168.88.1` | Gateway, DNS y Hotspot |
 | AP-01 | `192.168.88.2` | Gestión de OpenWrt |
-| Servidor interno | `192.168.88.3` | Dirección reservada |
+| SRV-RADIUS | `192.168.88.3` | Ubuntu Desktop y FreeRADIUS externo |
 | Pool estudiantes | `192.168.88.4-192.168.88.99` | DHCP principal |
 | Pool administrativo | `192.168.88.100-192.168.88.200` | Reservado para una futura VLAN o reservas MAC |
 | WAN | DHCP de NAT GNS3 | Salida a Internet |
@@ -88,6 +88,7 @@ No asigne el pool administrativo en la misma red de manera aleatoria. Para difer
 
 - MikroTik CHR RouterOS 7.x, descargado desde la fuente oficial.
 - OpenWrt x86/64 para QEMU/KVM.
+- Ubuntu Desktop para el servidor externo FreeRADIUS.
 - Webterm Docker o una VM Linux con navegador y herramientas `ip`, `dig`, `nslookup` e `iperf3`.
 - Certificado TLS para el Hotspot, únicamente en el entorno local.
 - Datos de una cuenta administrativa inicial y secreto RADIUS de laboratorio.
@@ -150,10 +151,11 @@ Realice los cambios en este orden para evitar perder acceso:
 2. Configure el bridge LAN y la IP `192.168.88.1/24` en R-CORE.
 3. Configure WAN por DHCP, DNS, DHCP, NAT y firewall.
 4. Configure OpenWrt como bridge con la IP `192.168.88.2`.
-5. Compruebe que el cliente recibe DHCP y tiene salida a Internet.
-6. Configure Hotspot, certificado TLS y RADIUS.
-7. Cree los perfiles `estudiante` y `docente`.
-8. Active los registros y ejecute la matriz de pruebas.
+5. Configure Ubuntu Desktop como servidor FreeRADIUS externo con la IP `192.168.88.3`.
+6. Compruebe que el cliente recibe DHCP y tiene salida a Internet.
+7. Configure Hotspot, certificado TLS y RADIUS.
+8. Cree los perfiles `estudiante` y `docente`.
+9. Active los registros y ejecute la matriz de pruebas.
 
 La configuración gráfica completa del router está en [GUIA-CONFIGURACION-WINBOX.md](./GUIA-CONFIGURACION-WINBOX.md). La configuración específica del AP está en [Paso_8_Configuracion_OpenWrt_AP.md](./Paso_8_Configuracion_OpenWrt_AP.md).
 

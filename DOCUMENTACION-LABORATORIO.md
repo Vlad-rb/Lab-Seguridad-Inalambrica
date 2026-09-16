@@ -29,6 +29,7 @@ Diseñar y validar una red inalámbrica administrable que proporcione:
 |---|---|---|
 | `R-CORE` | MikroTik CHR RouterOS 7.x | Gateway, NAT, DHCP, DNS, firewall, Hotspot, RADIUS y QoS |
 | `AP-01` | OpenWrt x86/64 | AP virtual y puente Ethernet de capa 2 |
+| `SRV-RADIUS` | Ubuntu Desktop | Servidor externo FreeRADIUS para autenticar el Hotspot |
 | `CLIENTE-01` | Webterm o VM Linux | Navegador, terminal y pruebas de conectividad |
 | `SW-LAN` | Switch Ethernet de GNS3 | Interconexión de la LAN |
 | `NAT-GNS3` | Nodo NAT de GNS3 | Salida WAN simulada |
@@ -62,13 +63,18 @@ El resultado del laboratorio no debe interpretarse como una validación de cober
                                     | ether2 (LAN)
                               +-----v------+
                               | SW-LAN     |
-                              +--+-------+-+
-                                 |       |
-                         +-------v-+   +-v----------+
-                         | AP-01   |   | CLIENTE-01 |
-                         | OpenWrt |   | Webterm    |
-                         | br-lan  |   +------------+
-                         +---------+
+                              +--+---+---+---+
+                                 |   |       |
+                         +-------v+  |  +----v-------+
+                         | AP-01  |  |  | CLIENTE-01 |
+                         | OpenWrt|  |  | Webterm    |
+                         | br-lan |  |  +------------+
+                         +--------+  |
+                              +------v------+
+                              | SRV-RADIUS  |
+                              | Ubuntu      |
+                              | FreeRADIUS   |
+                              +-------------+
 ```
 
 ### Imagen recomendada 1: topología completa
@@ -97,7 +103,7 @@ Insertar una captura de la ventana de GNS3 donde se observen:
 | LAN del laboratorio | `192.168.88.0/24` | Segmento común de pruebas |
 | Gateway R-CORE | `192.168.88.1` | Puerta de enlace, DNS y Hotspot |
 | Gestión AP-01 | `192.168.88.2` | Administración de OpenWrt |
-| Servidor interno | `192.168.88.3` | Dirección reservada |
+| Servidor RADIUS Ubuntu | `192.168.88.3` | Autenticación externa del Hotspot |
 | Pool estudiantes | `192.168.88.4-192.168.88.99` | DHCP principal |
 | Pool administrativo | `192.168.88.100-192.168.88.200` | Reservado para VLAN o reservas MAC |
 | WAN | DHCP | Dirección recibida desde NAT de GNS3 |
@@ -130,6 +136,7 @@ Crear una imagen o captura de una tabla que muestre los equipos, interfaces, IP,
 |---|---|---|
 | MikroTik CHR | Router principal | Descargar desde la fuente oficial de MikroTik |
 | OpenWrt x86/64 Combined ext4 | AP virtual | Descargar desde `downloads.openwrt.org` |
+| Ubuntu Desktop | Servidor externo | Interfaz gráfica y servicio FreeRADIUS |
 | Webterm o Linux | Cliente de pruebas | Incluir navegador, `ip`, `dig`, `nslookup` e `iperf3` |
 
 Documentar en el informe:
@@ -212,19 +219,106 @@ Capturar la configuración de `R-CORE`, mostrando los adaptadores WAN y LAN.
 
 ---
 
+### 5.4 Configurar Ubuntu Desktop como servidor RADIUS
+
+En este escenario Ubuntu actúa como servidor externo de autenticación. R-CORE sigue realizando DHCP, NAT, firewall, Hotspot y QoS; Ubuntu únicamente valida las credenciales mediante FreeRADIUS.
+
+1. Importe una VM Ubuntu Desktop y conéctela a `SW-LAN`.
+2. Asigne una interfaz de red, al menos 2 GB de RAM y acceso a la interfaz gráfica.
+3. En **Settings > Network**, configure una IP manual:
+   - Dirección: `192.168.88.3/24`
+   - Gateway: `192.168.88.1`
+   - DNS: `192.168.88.1`
+4. Cambie la contraseña de la cuenta administrativa y actualice el sistema.
+5. Compruebe la conectividad:
+
+```bash
+ip addr
+ip route
+ping -c 4 192.168.88.1
+```
+
+6. Abra **Terminal** e instale FreeRADIUS:
+
+```bash
+sudo apt update
+sudo apt install freeradius freeradius-utils
+sudo systemctl enable --now freeradius
+```
+
+7. Realice una copia de la configuración:
+
+```bash
+sudo cp -a /etc/freeradius/3.0 /etc/freeradius/3.0.backup
+```
+
+8. Edite `/etc/freeradius/3.0/clients.conf` y registre a R-CORE:
+
+```text
+client r-core {
+    ipaddr = 192.168.88.1
+    secret = CAMBIAR_SECRET_RADIUS
+    shortname = r-core
+}
+```
+
+9. Edite `/etc/freeradius/3.0/mods-config/files/authorize` y agregue usuarios de laboratorio:
+
+```text
+estudiante01 Cleartext-Password := "CAMBIAR_CLAVE_ESTUDIANTE"
+    Mikrotik-Group := "estudiante"
+
+docente01 Cleartext-Password := "CAMBIAR_CLAVE_DOCENTE"
+    Mikrotik-Group := "docente"
+```
+
+10. Valide y reinicie:
+
+```bash
+sudo freeradius -XC
+sudo systemctl restart freeradius
+sudo systemctl status freeradius --no-pager
+```
+
+11. Si el firewall de Ubuntu está habilitado, permita únicamente las solicitudes RADIUS desde R-CORE:
+
+```bash
+sudo ufw allow from 192.168.88.1 to any port 1812 proto udp
+sudo ufw allow from 192.168.88.1 to any port 1813 proto udp
+sudo ufw enable
+```
+
+El puerto `1813` solo es necesario si se utilizará accounting. No exponga RADIUS a Internet.
+
+12. Pruebe localmente:
+
+```bash
+radtest estudiante01 CAMBIAR_CLAVE_ESTUDIANTE 127.0.0.1 0 CAMBIAR_SECRET_RADIUS
+```
+
+La respuesta esperada es `Access-Accept`. El secreto debe coincidir con el configurado en Winbox. En producción, sustituya usuarios en texto plano por LDAP, Active Directory, SQL u otro almacén institucional.
+
+### Imagen recomendada 5: servidor Ubuntu RADIUS
+
+Capturar la configuración gráfica de red, la IP `192.168.88.3`, la ruta hacia `192.168.88.1` y el estado activo del servicio. No mostrar claves ni secretos.
+
+**Nombre sugerido:** `docs/img/05-servidor-ubuntu-radius.png`
+
 ## 6. Creación de la topología
 
 1. Crear el proyecto `colegio-los-robles`.
-2. Añadir `NAT-GNS3`, `R-CORE`, `AP-01`, `SW-LAN` y `CLIENTE-01`.
+2. Añadir `NAT-GNS3`, `R-CORE`, `AP-01`, `SW-LAN`, `SRV-RADIUS` y `CLIENTE-01`.
 3. Conectar `NAT-GNS3` con `R-CORE/ether1`.
 4. Conectar `R-CORE/ether2` con `SW-LAN`.
 5. Conectar `AP-01/eth0` con `SW-LAN`.
-6. Conectar `CLIENTE-01` con `SW-LAN`.
-7. Opcionalmente conectar `AP-01/eth1` a un segundo cliente.
-8. Iniciar los nodos en el siguiente orden:
+6. Conectar `SRV-RADIUS` con `SW-LAN`.
+7. Conectar `CLIENTE-01` con `SW-LAN`.
+8. Opcionalmente conectar `AP-01/eth1` a un segundo cliente.
+9. Iniciar los nodos en el siguiente orden:
    - SW-LAN.
    - R-CORE.
    - AP-01.
+   - SRV-RADIUS.
    - CLIENTE-01.
 
 Antes de configurar, confirmar:
@@ -259,7 +353,7 @@ La alternativa completa por comandos está en [CONFIGURACION-CLI-ROUTEROS.md](./
 
 Capturar en Winbox las interfaces, la dirección LAN, el cliente DHCP WAN, las concesiones DHCP y los contadores de firewall/NAT.
 
-### Imagen recomendada 5: interfaces e IP de R-CORE
+### Imagen recomendada 6: interfaces e IP de R-CORE
 
 Capturar en Winbox:
 
@@ -267,9 +361,9 @@ Capturar en Winbox:
 - **IP > Addresses** con `192.168.88.1/24`.
 - **IP > DHCP Client** mostrando WAN `bound`.
 
-**Nombre sugerido:** `docs/img/05-r-core-interfaces.png`
+**Nombre sugerido:** `docs/img/06-r-core-interfaces.png`
 
-### Imagen recomendada 6: DHCP y NAT
+### Imagen recomendada 7: DHCP y NAT
 
 Capturar:
 
@@ -277,7 +371,7 @@ Capturar:
 - **IP > Firewall > NAT** con la regla masquerade.
 - Contadores de paquetes y bytes.
 
-**Nombre sugerido:** `docs/img/06-r-core-dhcp-nat.png`
+**Nombre sugerido:** `docs/img/07-r-core-dhcp-nat.png`
 
 ---
 
@@ -295,7 +389,7 @@ Para el informe del laboratorio, registrar mediante capturas de LuCI:
 
 Si se usa una radio compatible, configurar el SSID `LosRobles_WiFi` con WPA3-SAE. Una VM QEMU con interfaces Ethernet no constituye una validación de WPA3.
 
-### Imagen recomendada 7: configuración de red OpenWrt
+### Imagen recomendada 8: configuración de red OpenWrt
 
 Capturar LuCI en **Network > Interfaces** mostrando:
 
@@ -305,9 +399,9 @@ Capturar LuCI en **Network > Interfaces** mostrando:
 - Bridge `br-lan`.
 - DHCP deshabilitado.
 
-**Nombre sugerido:** `docs/img/07-openwrt-red.png`
+**Nombre sugerido:** `docs/img/08-openwrt-red.png`
 
-### Imagen recomendada 8: bridge OpenWrt
+### Imagen recomendada 9: bridge OpenWrt
 
 Capturar la salida de:
 
@@ -317,7 +411,7 @@ bridge link
 
 o una vista de LuCI donde se observen los puertos del bridge.
 
-**Nombre sugerido:** `docs/img/08-openwrt-bridge.png`
+**Nombre sugerido:** `docs/img/09-openwrt-bridge.png`
 
 ---
 
@@ -361,7 +455,7 @@ Crear en **IP > Hotspot > User Profiles**:
 
 Configurar usuarios de prueba y confirmar en **IP > Hotspot > Active** que el perfil aplicado sea el esperado.
 
-### Imagen recomendada 9: Hotspot y perfiles
+### Imagen recomendada 10: Hotspot y perfiles
 
 Capturar:
 
@@ -369,9 +463,9 @@ Capturar:
 - Certificado seleccionado.
 - Perfiles `estudiante` y `docente`.
 
-**Nombre sugerido:** `docs/img/09-hotspot-perfiles.png`
+**Nombre sugerido:** `docs/img/10-hotspot-perfiles.png`
 
-### Imagen recomendada 10: RADIUS y sesiones
+### Imagen recomendada 11: RADIUS y sesiones
 
 Capturar:
 
@@ -381,7 +475,7 @@ Capturar:
 
 Ocultar nombres de usuario reales, contraseñas, secretos y datos que no sean necesarios.
 
-**Nombre sugerido:** `docs/img/10-radius-sesion.png`
+**Nombre sugerido:** `docs/img/11-radius-sesion.png`
 
 ---
 
@@ -431,7 +525,7 @@ ping -c 4 192.168.88.1
 /log print
 ```
 
-### Imagen recomendada 11: evidencia de pruebas
+### Imagen recomendada 12: evidencia de pruebas
 
 Presentar una captura del terminal del cliente con:
 
@@ -440,16 +534,16 @@ Presentar una captura del terminal del cliente con:
 - Resolución DNS.
 - Resultado de conectividad.
 
-**Nombre sugerido:** `docs/img/11-pruebas-cliente.png`
+**Nombre sugerido:** `docs/img/12-pruebas-cliente.png`
 
-### Imagen recomendada 12: QoS
+### Imagen recomendada 13: QoS
 
 Presentar una captura de `iperf3` o de una herramienta de medición controlada para cada perfil. No mostrar credenciales.
 
 **Nombres sugeridos:**
 
-- `docs/img/12-qos-estudiante.png`
-- `docs/img/13-qos-docente.png`
+- `docs/img/13-qos-estudiante.png`
+- `docs/img/14-qos-docente.png`
 
 ---
 
@@ -464,15 +558,16 @@ docs/
     ├── 02-plan-direccionamiento.png
     ├── 03-configuracion-vm-openwrt.png
     ├── 04-configuracion-vm-routeros.png
-    ├── 05-r-core-interfaces.png
-    ├── 06-r-core-dhcp-nat.png
-    ├── 07-openwrt-red.png
-    ├── 08-openwrt-bridge.png
-    ├── 09-hotspot-perfiles.png
-    ├── 10-radius-sesion.png
-    ├── 11-pruebas-cliente.png
-    ├── 12-qos-estudiante.png
-    └── 13-qos-docente.png
+    ├── 05-servidor-ubuntu-radius.png
+    ├── 06-r-core-interfaces.png
+    ├── 07-r-core-dhcp-nat.png
+    ├── 08-openwrt-red.png
+    ├── 09-openwrt-bridge.png
+    ├── 10-hotspot-perfiles.png
+    ├── 11-radius-sesion.png
+    ├── 12-pruebas-cliente.png
+    ├── 13-qos-estudiante.png
+    └── 14-qos-docente.png
 ```
 
 ### 11.2 Reglas para las capturas
@@ -533,6 +628,9 @@ El procedimiento de creación, firma, exportación de la CA e integración con H
 - [ ] `R-CORE` tiene WAN, LAN, DHCP, NAT y firewall.
 - [ ] OpenWrt usa `192.168.88.2/24`.
 - [ ] OpenWrt opera como bridge y no entrega DHCP.
+- [ ] Ubuntu `SRV-RADIUS` tiene IP fija `192.168.88.3` y FreeRADIUS activo.
+- [ ] R-CORE está registrado en FreeRADIUS con un secreto compartido no publicado.
+- [ ] FreeRADIUS responde `Access-Accept` a las cuentas de prueba.
 - [ ] El cliente obtiene dirección del pool de R-CORE.
 - [ ] DNS y salida a Internet funcionan.
 - [ ] El acceso administrativo desde WAN está bloqueado.

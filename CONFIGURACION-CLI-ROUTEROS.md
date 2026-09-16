@@ -137,7 +137,21 @@ Un certificado autofirmado produce advertencia en los clientes hasta que se inst
 
 Descargue únicamente el `.crt` de la CA e instálelo en el cliente del laboratorio.
 
-## 7. Hotspot, RADIUS y perfiles
+## 7. Configurar Ubuntu como RADIUS externo
+
+En Ubuntu Desktop configure `192.168.88.3/24` con gateway `192.168.88.1`, instale FreeRADIUS y registre R-CORE en `/etc/freeradius/3.0/clients.conf`:
+
+```text
+client r-core {
+    ipaddr = 192.168.88.1
+    secret = CAMBIAR_SECRET_RADIUS
+    shortname = r-core
+}
+```
+
+Agregue usuarios de laboratorio en `mods-config/files/authorize`, valide con `sudo freeradius -XC` y pruebe con `radtest`. Permita únicamente desde `192.168.88.1` los puertos UDP `1812` y, si se usa accounting, `1813`.
+
+## 8. Hotspot, RADIUS y perfiles
 
 Ejecute el asistente y confirme cada valor antes de continuar:
 
@@ -149,7 +163,7 @@ Seleccione `bridge-lan`, una dirección `192.168.88.1/24`, un pool que no se sol
 
 ```routeros
 /radius
-add address=127.0.0.1 service=hotspot secret="CAMBIAR_SECRET_RADIUS"
+add address=192.168.88.3 service=hotspot secret="CAMBIAR_SECRET_RADIUS"
 
 /ip hotspot profile
 set [find name="default"] ssl-certificate=Hotspot-LosRobles use-radius=yes login-by=https,http-chap
@@ -159,7 +173,7 @@ add name=estudiante rate-limit=10M/10M shared-users=1
 add name=docente rate-limit=30M/30M shared-users=1
 ```
 
-La dirección `127.0.0.1` solo es correcta si User Manager está en el mismo router. Cambie la dirección si RADIUS está en otro servidor.
+La dirección `192.168.88.3` corresponde al Ubuntu externo. `127.0.0.1` solo sería correcta si User Manager o RADIUS estuviera instalado en el mismo router.
 
 ## 8. Registros y respaldo
 

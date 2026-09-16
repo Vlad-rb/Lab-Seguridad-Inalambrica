@@ -31,7 +31,7 @@ Antes de comenzar:
 | Pool estudiantes | `192.168.88.4-192.168.88.99` |
 | Pool administrativo | `192.168.88.100-192.168.88.200` |
 | Gestión AP | `192.168.88.2/24` |
-| Servidor interno | `192.168.88.3/24` |
+| Servidor RADIUS Ubuntu | `192.168.88.3/24` |
 | Perfil estudiante | `10M/10M` |
 | Perfil docente | `30M/30M` |
 
@@ -336,18 +336,21 @@ No subir certificados privados, claves, contraseñas ni archivos de importación
 
 ### 11.5 Activar RADIUS en Hotspot
 
-1. Ir a **Radius > +**.
-2. En **Address**, escribir `127.0.0.1` si User Manager está en el mismo RouterOS.
-3. En **Service**, marcar `hotspot`.
-4. En **Secret**, escribir un secreto fuerte.
-5. Pulsar **Apply > OK**.
-6. Ir a **IP > Hotspot > Server Profiles**.
-7. Abrir el perfil utilizado.
-8. En la pestaña **Login**, activar **Use RADIUS**.
-9. Seleccionar `https` y el método de autenticación compatible.
-10. Pulsar **Apply > OK**.
+1. En Ubuntu Desktop, configure la IP fija `192.168.88.3/24`, instale FreeRADIUS y registre `192.168.88.1` en `clients.conf` con un secreto compartido.
+2. En Winbox, ir a **Radius > +**.
+3. En **Address**, escribir `192.168.88.3`.
+4. En **Service**, marcar `hotspot`.
+5. En **Secret**, escribir exactamente el mismo secreto configurado en Ubuntu.
+6. Pulsar **Apply > OK**.
+7. Ir a **IP > Hotspot > Server Profiles**.
+8. Abrir el perfil utilizado.
+9. En la pestaña **Login**, activar **Use RADIUS**.
+10. Seleccionar `https` y el método de autenticación compatible.
+11. Pulsar **Apply > OK**.
 
-El método exacto de integración de User Manager depende de la versión instalada. Probar primero con una cuenta de laboratorio y verificar los eventos en **Log**.
+En Ubuntu, valide con `sudo freeradius -XC`, `sudo systemctl status freeradius` y `radtest`. Desde el cliente, pruebe una cuenta de estudiante y otra de docente. En R-CORE compruebe **IP > Hotspot > Active** y **Log**. El firewall de Ubuntu debe permitir UDP `1812` (autenticación) y, si se usa accounting, UDP `1813`; restrinja el origen a `192.168.88.1`.
+
+El atributo `Mikrotik-Group` puede asociar el usuario con un perfil de Hotspot si la integración y la versión de RouterOS lo soportan. Si no se devuelve ese atributo, cree usuarios de prueba en R-CORE o ajuste la respuesta RADIUS según la documentación de la versión instalada.
 
 ## 12. Perfiles de velocidad y usuarios
 
